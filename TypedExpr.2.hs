@@ -1,6 +1,5 @@
 {-# LANGUAGE DataKinds
            , GADTs
-           , KindSignatures
            , PolyKinds
            , RankNTypes
            , StandaloneDeriving
@@ -184,7 +183,7 @@ anf sc (EBin op e1 e2) =
                     let env = eappend sc tsc2 tsc1 env2 env1
                         v1' = shiftExpr' SNil tsc2 (sappend tsc1 sc) v1
                         v2' = shiftExpr' tsc2 tsc1 sc v2 
-                        e' = (EBin op v1' v2')
+                        e' = EBin op v1' v2'
                         e'' = exprCtxAssoc1 tsc2 tsc1 sc e'
                         ee = EnvExpr (sappend tsc2 tsc1) env e''
                     in mkLet sc ee
@@ -196,7 +195,7 @@ anf sc (EApp e1 e2) =
                     let env = eappend sc tsc2 tsc1 env2 env1
                         v1' = shiftExpr' SNil tsc2 (sappend tsc1 sc) v1
                         v2' = shiftExpr' tsc2 tsc1 sc v2 
-                        e' = (EApp v1' v2')
+                        e' = EApp v1' v2'
                         e'' = exprCtxAssoc1 tsc2 tsc1 sc e'
                         ee = EnvExpr (sappend tsc2 tsc1) env e''
                     in mkLet sc ee
@@ -210,10 +209,10 @@ mkLet sc (EnvExpr (SCons _ sts) (EnvCons e' env) e) =
 imm :: SContext ctx -> Expr ctx t c -> AnfEnvImmExpr ctx t
 imm _  (EInt n)       = EnvExpr SNil EnvNil (EInt n)
 imm _  (EVar st x)    = EnvExpr SNil EnvNil (EVar st x)
-imm sc e@(ELet {})    = let (env, e') = immExpr sc e
+imm sc e@ELet {}      = let (env, e') = immExpr sc e
                             tsc = SCons (stype e) SNil
                         in EnvExpr tsc env e'
-imm sc e@(ELam {})    = let (env, e') = immExpr sc e
+imm sc e@ELam {}      = let (env, e') = immExpr sc e
                             tsc = SCons (stype e) SNil
                         in EnvExpr tsc env e'
 imm sc (EBin o e1 e2) = imm2 sc e1 e2 (EBin o)
@@ -268,3 +267,61 @@ srcExpr = EBin Times
 --                  )
 --            )
 --      )
+
+
+substHas :: SContext ctx0 -> SType t -> SContext ctx1
+         -> Expr ctx1 s c -> Has (App ctx0 (s ': ctx1)) t
+         -> Expr (App ctx0 ctx1) t c
+substHas SNil           _  _   es First    = es 
+substHas SNil           st _   _  (Next x) = EVar st x
+substHas (SCons _ _)    st _   _  First    = EVar st First
+substHas (SCons s0 sc0) st sc1 es (Next x) =
+    let e = substHas sc0 st sc1 es x
+    in shiftExpr SNil s0 (sappend sc0 sc1) e
+
+relax :: Expr ctx t c -> Expr ctx t 'Top
+relax (EInt n)        = EInt n
+relax (EVar st x)     = EVar st x
+relax (ELet e1 e2)    = ELet (relax e1) (relax e2)
+relax (ELam st e)     = ELam st (relax e)
+relax (EBin op e1 e2) = EBin op (relax e1) (relax e2)
+relax (EApp e1 e2)    = EApp (relax e1) (relax e2)
+
+subst :: SContext ctx0 -> SContext ctx1
+      -> Expr ctx1 s c1 -> Expr (App ctx0 (s ': ctx1)) t c2
+      -> Expr (App ctx0 ctx1) t 'Top
+subst _   _   _  (EInt n)    = EInt n
+subst sc0 sc1 es (EVar st x) = relax $ substHas sc0 st sc1 es x
+subst sc0 sc1 es (ELet e1 e2) = 
+    let e1' = subst sc0 sc1 es e1
+        e2' = subst (SCons (stype e1) sc0) sc1 es e2
+    in ELet e1' e2'
+subst sc0 sc1 es (ELam st e) = 
+    let e' = subst (SCons st sc0) sc1 es e
+    in ELam st e'
+subst sc0 sc1 es (EBin op e1 e2) =
+    let e1' = subst sc0 sc1 es e1
+        e2' = subst sc0 sc1 es e2
+    in EBin op e1' e2'
+subst sc0 sc1 es (EApp e1 e2) =
+    let e1' = subst sc0 sc1 es e1
+        e2' = subst sc0 sc1 es e2
+    in EApp e1' e2'
+
+eval :: SContext ctx -> Expr ctx t c -> Expr ctx t 'Top
+eval _  (EInt n)        = EInt n
+eval _  (EVar st x)     = EVar st x 
+eval sc (ELet e1 e2)    = let e1' = eval sc e1
+                              se  = subst SNil sc e1' e2
+                          in eval sc se
+eval _  (ELam st e)     = ELam st (relax e)
+eval sc (EBin op e1 e2) = let EInt n1 = eval sc e1
+                              EInt n2 = eval sc e2
+                          in case op of
+                               Plus -> EInt (n1 + n2)
+                               Minus -> EInt (n1 - n2)
+                               Times -> EInt (n1 * n2)
+eval sc (EApp e1 e2) = case eval sc e1 of
+                            ELam _ e -> let e2' = eval sc e2
+                                            se = subst SNil sc e2' e
+                                        in eval sc se

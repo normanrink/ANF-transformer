@@ -4,7 +4,6 @@
 
 {-# LANGUAGE DataKinds
            , GADTs
-           , KindSignatures
            , StandaloneDeriving
            , TypeFamilies       #-}
 
@@ -86,8 +85,8 @@ mkLet ((x,e):bs) e' = ELet x e (mkLet bs e')
 imm :: Expr c -> AnfM ([(Var, AnfExpr)], ImmExpr)
 imm (EInt n)       = return ([], EInt n)
 imm (EVar x)       = return ([], EVar x)
-imm e@(ELet {})    = immExpr e
-imm e@(ELam {})    = immExpr e
+imm e@ELet {}      = immExpr e
+imm e@ELam {}      = immExpr e
 imm (EBin o e1 e2) = imm2 e1 e2 (EBin o)
 imm (EApp e1 e2)   = imm2 e1 e2 EApp
 

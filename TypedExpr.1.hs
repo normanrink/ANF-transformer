@@ -1,6 +1,5 @@
 {-# LANGUAGE DataKinds
            , GADTs
-           , KindSignatures
            , ScopedTypeVariables
            , StandaloneDeriving
            , TypeApplications
@@ -132,7 +131,7 @@ anf sc (EApp e1 e2) =
     in ELet v2 (ELet v1 ap)
 
 toAnf :: Expr '[] t c -> AnfExpr '[] t
-toAnf e = anf SNil e
+toAnf = anf SNil
 
 type IntExpr = Expr '[] 'IntT 'Imm
 
